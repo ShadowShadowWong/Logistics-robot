@@ -1,0 +1,358 @@
+//This code is used for error analysis of gyroscopes
+//using ultrasonic and infrared sensors,
+//and basic PID and filtering algorithms are used.
+#include <SR04.h>
+#define TRIG_PIN_1 23 //23号引脚为1号超声波输入（正向左，接线红）
+#define ECHO_PIN_1 22 //22号引脚为1号超声波控制（接线绿蓝黑）
+
+#define TRIG_PIN_2 21 //21号引脚为2号超声波输入（正向右，接线红）
+#define ECHO_PIN_2 20 //20号引脚为2号超声波控制（接线绿蓝黑）
+
+#define TRIG_PIN_3 25 //25号引脚为3号超声波输入（接线红）
+#define ECHO_PIN_3 24 //24号引脚为3号超声波控制（接线绿蓝黑）
+
+#define TRIG_PIN_4 21 //号引脚为4号超声波输入（接线红）
+#define TRIG_PIN_4 21 //号引脚为4号超声波控制（接线绿蓝黑）
+
+#define TRIG_PIN_5 21 //号引脚为5号超声波输入（接线红）
+#define TRIG_PIN_5 21 //号引脚为5号超声波控制（接线绿蓝黑）
+
+SR04 sr04_1 = SR04(ECHO_PIN_1, TRIG_PIN_1); //1号超声波（正向左）
+SR04 sr04_2 = SR04(ECHO_PIN_2, TRIG_PIN_2); //2号超声波（正向右）
+SR04 sr04_3 = SR04(ECHO_PIN_3, TRIG_PIN_3); //3号超声波
+SR04 sr04_4 = SR04(ECHO_PIN_4, TRIG_PIN_4); //4号超声波
+SR04 sr04_5 = SR04(ECHO_PIN_5, TRIG_PIN_5); //5号超声波
+
+float difference = 0; //1号、2号超声波障碍物距离差
+
+unsigned char cmd[8] = { 0x19, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11 };
+
+int flag = 0;
+
+int counting = 0;
+
+void setup() {
+  Serial.begin(9600); //与电脑通信波特率
+  Serial2.begin(115200); //驱动板初始化
+  Serial3.begin(115200);
+  Serial2.write(0x55);
+  delay(10);
+  Serial3.write(0x55);
+  delay(10);
+}
+
+void youpian(int zuo, int you) { //700 300
+  setcmd1('m', -zuo);
+  setcmd1('M', zuo);
+  setcmd2('m', you);
+  setcmd2('M', -you);
+}
+
+void zuopian(int zuo, int you) { //300 700
+  setcmd1('m', -zuo);
+  setcmd1('M', zuo);
+  setcmd2('m', you);
+  setcmd2('M', -you);
+}
+
+void forward(int qian) { //600
+  setcmd1('m', -qian);
+  setcmd1('M', qian);
+  setcmd2('m', qian);
+  setcmd2('M', -qian);
+}
+
+void back(int hou) { //600
+  setcmd1('m', hou);
+  setcmd1('M', -hou);
+  setcmd2('m', -hou);
+  setcmd2('M', hou);
+}
+
+void stop() {
+  setcmd1('m', 0);
+  setcmd1('M', 0);
+  setcmd2('m', 0);
+  setcmd2('M', 0);
+}
+
+void left(int zuo) { //500
+  setcmd1('m', zuo);
+  setcmd1('M', -zuo);
+  setcmd2('m', zuo);
+  setcmd2('M', -zuo);
+}
+
+void right(int you) { //500
+  setcmd1('m', -you);
+  setcmd1('M', you);
+  setcmd2('m', -you);
+  setcmd2('M', you);
+}
+
+void setcmd1(unsigned char Cmd_Send, long MotorSpeed) {
+  cmd[2] = Cmd_Send;
+  cmd[3] = (unsigned char)(MotorSpeed >> 24);
+  cmd[4] = (unsigned char)(MotorSpeed >> 16);
+  cmd[5] = (unsigned char)(MotorSpeed >> 8);
+  cmd[6] = (unsigned char)(MotorSpeed);
+  Serial2.write(cmd, 8);
+}
+
+void setcmd2(unsigned char Cmd_Send, long MotorSpeed) {
+  cmd[2] = Cmd_Send;
+  cmd[3] = (unsigned char)(MotorSpeed >> 24);
+  cmd[4] = (unsigned char)(MotorSpeed >> 16);
+  cmd[5] = (unsigned char)(MotorSpeed >> 8);
+  cmd[6] = (unsigned char)(MotorSpeed);
+  Serial3.write(cmd, 8);
+}
+
+int isforward() {
+  int sum = 0;
+  for (int i = 0; i < 6; i++) {
+    if (sr04_1.Distance() < 22 || sr04_2.Distance() < 22) {
+      sum++;
+    }
+  }
+  if (sum == 6) {
+    return 0; //0不能继续前进
+  }
+  else {
+    return 1; //1可以继续前进
+  }
+}
+
+int iscorrect() {
+  int sum = 0;
+  for (int i = 0; i < 20; i++) {
+    if (sr04_1.Distance() - sr04_2.Distance() <= 0.5 && sr04_1.Distance() - sr04_2.Distance() >= -0.5) {
+      sum++;
+    }
+  }
+  if (sum >= 15) {
+    return 1; //1已对齐
+  }
+  else {
+    return 0; //0没对齐
+  }
+}
+
+int isright() {
+  int sum = 0;
+  for (int i = 0; i < 10; i++) {
+    if (sr04_1.Distance() - sr04_2.Distance() > 0) {
+      sum++;
+    }
+  }
+  if (sum >= 7) {
+    return 1; //1右偏
+  }
+  else {
+    return 0; //不是右偏
+  }
+}
+
+int isleft() {
+  int sum = 0;
+  for (int i = 0; i < 10; i++) {
+    if (sr04_1.Distance() - sr04_2.Distance() < 0) {
+      sum++;
+    }
+  }
+  if (sum >= 7) {
+    return 1; //1左偏
+  }
+  else {
+    return 0; //不是左偏
+  }
+}
+
+int isnear() {
+  int sum = 0;
+  for (int i = 0; i < 5; i++) {
+    if (sr04_3.Distance() < 13) {
+      sum++;
+    }
+  }
+  if (sum >= 4) {
+    return 1; //1撞墙
+  }
+  else {
+    return 0; //不撞墙
+  }
+}
+
+float vdiff_right() { //物流车面对障碍物方向右偏，difference < 10 && difference > 0
+  float mini, maxi, ave, sum, temp;
+  int count = 0;
+  mini = 999;
+  maxi = 0;
+  sum = 0;
+  ave = 0;
+  for (int i = 0; i < 10; i++) {
+    temp = sr04_1.Distance() - sr04_2.Distance();
+    if (temp > 0 && temp < 10) {
+      sum = sum + temp;
+      count++;
+      if (temp > maxi) {
+        maxi = temp;
+      } else if (temp < mini) {
+        mini = temp;
+      }
+    }
+  }
+  sum = sum - (maxi + mini);
+  ave = sum / (count - 2);
+  if (ave < 0 || ave > 10) {
+    ave = 0;
+  }
+  return ave;
+}
+
+float vdiff_left() { //物流车面对障碍物方向左偏，difference > -10 && difference < 0
+  float mini, maxi, ave, sum, temp;
+  int count = 0;
+  mini = 999;
+  maxi = 0;
+  sum = 0;
+  ave = 0;
+  for (int i = 0; i < 10; i++) {
+    temp = -(sr04_1.Distance() - sr04_2.Distance());
+    if (temp > 0 && temp < 10) {
+      sum = sum + temp;
+      count++;
+      if (temp > maxi) {
+        maxi = temp;
+      } else if (temp < mini) {
+        mini = temp;
+      }
+    }
+  }
+  sum = sum - (maxi + mini);
+  ave = sum / (count - 2);
+  if (ave < 0 || ave > 10) {
+    ave = 0;
+  }
+  return ave;
+}
+
+void correcting() { //此函数用于校正自身方向，使物流车正面垂直面对障碍物
+  flag = 0;
+  while (flag == 0) {
+    if (isright() == 1) { //物流车面对障碍物方向右偏
+      if (iscorrect() == 1) { //是否已经对齐
+        stop();
+        flag = 1;
+        delay(300);
+      }
+      if (flag == 0) {
+        left(40 * vdiff_right());
+        delay(200);
+      }
+      if (iscorrect() == 1) { //是否已经对齐
+        stop();
+        flag = 1;
+        delay(500);
+      }
+    }
+    else if (isleft() == 1) { //物流车面对障碍物方向左偏
+      if (iscorrect() == 1) { //是否已经对齐
+        stop();
+        flag = 1;
+        delay(500);
+      }
+      if (flag == 0) {
+        right(40 * vdiff_left());
+        delay(200);
+      }
+      if (iscorrect() == 1) { //是否已经对齐
+        stop();
+        flag = 1;
+        delay(500);
+      }
+    }
+    else {
+      if (iscorrect() == 1) { //是否已经对齐
+        stop();
+        flag = 1;
+        delay(500);
+      }
+    }
+  }
+}
+
+void findway() {
+  if (counting == 4) {
+    if (isback() == 0) {
+      back(1000);
+    }
+  } else {
+    if (isforward() == 1) {
+      if (isnear() == 1) {
+        right(200);
+        delay(800);
+      }
+      forward(1000);
+    }
+    else {
+      Serial.print("1号超声波（正向右）的障碍物距离");
+      Serial.print(sr04_1.Distance());
+      Serial.println("cm");
+      Serial.print("2号超声波（正向右）的障碍物距离");
+      Serial.print(sr04_2.Distance());
+      Serial.println("cm");
+      stop();
+      delay(1000);
+      if (iscorrect() == 0) {
+        correcting();
+        for (int i = 0; i < 5; ++i) {
+          Serial.print(sr04_1.Distance());
+          Serial.print("   ");
+          Serial.println(sr04_2.Distance());
+        }
+      }
+      else {
+        flag = 1;
+      }
+      if (flag == 1) {
+        right(440);
+        delay(5100);
+        counting++;
+      }
+    }
+  }
+}
+
+int isback() {
+  int sum = 0;
+  for (int i = 0; i < 5; i++) {
+    if (sr04_4.Distance() < 13 || sr04_5.Distance() < 13) {
+      sum++;
+    }
+  }
+  if (sum >= 4) {
+    return 1; //1倒车完毕
+  }
+  else {
+    return 0; //倒车未完成
+  }
+}
+
+void loop() {
+  //  Serial.print("1号超声波（正向左）的障碍物距离");
+  //  Serial.print(sr04_1.Distance());
+  //  Serial.println("cm");
+  //  Serial.print("2号超声波（正向右）的障碍物距离");
+  //  Serial.print(sr04_2.Distance());
+  //  Serial.println("cm");
+  //  Serial.println(sr04_1.Distance() - sr04_2.Distance());
+  //  Serial.print(sr04_3.Distance());
+  //  Serial.println("cm");
+  //  correcting();
+  findway();
+  //    right(800);
+  //  delay(3000);
+  //  stop();
+  //  delay(1000);
+}
